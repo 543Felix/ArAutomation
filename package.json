@@ -1,0 +1,34 @@
+{
+  "name": "arautomation",
+  "version": "1.0.0",
+  "description": "Express MVC backend with MongoDB and JWT",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=24.14.1"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/543Felix/ArAutomation.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/543Felix/ArAutomation/issues"
+  },
+  "homepage": "https://github.com/543Felix/ArAutomation#readme",
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.14.2",
+    "morgan": "^1.10.0"
+  }
+}
