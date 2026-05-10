@@ -7,6 +7,12 @@ async function findByArEntryId(arEntryId) {
   return EmailThread.findOne({ arEntryId: oid }).lean();
 }
 
+async function findByArEntryIds(arEntryIds) {
+  const oids = [...new Set((arEntryIds || []).map((id) => toObjectId(id)).filter(Boolean))];
+  if (!oids.length) return [];
+  return EmailThread.find({ arEntryId: { $in: oids } }).lean();
+}
+
 async function upsertEmptyThread({ arEntryId, invoiceNo, threadId }) {
   const oid = toObjectId(arEntryId);
   if (!oid) return null;
@@ -52,6 +58,7 @@ async function appendMessageIfNew(arEntryId, messageDoc) {
 
 module.exports = {
   findByArEntryId,
+  findByArEntryIds,
   upsertEmptyThread,
   appendMessageIfNew,
 };

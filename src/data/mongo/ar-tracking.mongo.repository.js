@@ -25,6 +25,12 @@ async function ensureDocument(arEntryId, invoiceNo) {
 /**
  * Append one immutable timeline event (never replaces history).
  */
+async function findByArEntryIds(arEntryIds) {
+  const oids = [...new Set((arEntryIds || []).map((id) => toObjectId(id)).filter(Boolean))];
+  if (!oids.length) return [];
+  return ArTracking.find({ arEntryId: { $in: oids } }).lean();
+}
+
 async function appendEvent(arEntryId, invoiceNo, event) {
   const oid = toObjectId(arEntryId);
   if (!oid) return null;
@@ -43,6 +49,7 @@ async function appendEvent(arEntryId, invoiceNo, event) {
 
 module.exports = {
   findByArEntryId,
+  findByArEntryIds,
   ensureDocument,
   appendEvent,
 };

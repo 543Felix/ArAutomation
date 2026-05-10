@@ -10,6 +10,7 @@ const emailRoutes = require('../../modules/email/email.routes');
 const ecobillzRoutes = require('../../modules/ecobillz/ecobillz.routes');
 const companyRoutes = require('../../modules/company/company.routes');
 const trackingRoutes = require('../../modules/tracking/tracking.routes');
+const aiRoutes = require('../../modules/ai/ai.routes');
 
 const router = express.Router();
 
@@ -29,5 +30,6 @@ router.use('/document', documentRoutes);
 router.use('/matching', matchingRoutes);
 router.use('/email', emailRoutes);
 router.use('/ecobillz', ecobillzRoutes);
+router.use('/ai', aiRoutes);
 
 module.exports = router;

@@ -1,5 +1,6 @@
 const ArEntry = require('../../modules/ar/ar-entry.model');
 const { AR_STATUS, AR_LOG_LEVEL } = require('../../modules/ar/ar.constants');
+const { customerGroupFilterFromEntry } = require('../../modules/ar/customer-scope.util');
 const { toObjectId } = require('./object-id.util');
 
 async function pushLog(arEntryId, logDoc) {
@@ -132,6 +133,51 @@ async function findByIds(ids) {
   return ArEntry.find({ _id: { $in: unique } });
 }
 
+/**
+ * All AR rows for the same customer cohort as `anchorEntry` (merchant/outlet + billing id / company name ± guest).
+ * The anchor `_id` is always included; remaining rows fill by `updatedAt` (newest first) up to cap.
+ */
+async function findEntriesForCustomerGroup(anchorEntry) {
+  const max =
+    Number(process.env.AI_CUSTOMER_ANALYSIS_MAX_ENTRIES) > 0
+      ? Math.min(200, Number(process.env.AI_CUSTOMER_ANALYSIS_MAX_ENTRIES))
+      : 60;
+  const filter = customerGroupFilterFromEntry(anchorEntry);
+  if (!filter) return [];
+
+  if (filter._id != null) {
+    const row = await ArEntry.findOne(filter).lean();
+    return row ? [row] : [];
+  }
+
+  const anchorOid = toObjectId(anchorEntry._id);
+  const restSlots = Math.max(0, max - 1);
+  const restFilter =
+    anchorOid != null ? { ...filter, _id: { $ne: anchorOid } } : { ...filter };
+
+  const [anchorRow, others] = await Promise.all([
+    anchorOid ? ArEntry.findById(anchorOid).lean() : null,
+    restSlots > 0
+      ? ArEntry.find(restFilter).sort({ updatedAt: -1 }).limit(restSlots).lean()
+      : [],
+  ]);
+
+  const merged = [];
+  const seen = new Set();
+  if (anchorRow) {
+    merged.push(anchorRow);
+    seen.add(String(anchorRow._id));
+  }
+  for (const r of others || []) {
+    const id = String(r._id);
+    if (!seen.has(id)) {
+      merged.push(r);
+      seen.add(id);
+    }
+  }
+  return merged;
+}
+
 async function setInvoiceNotFound(entryId) {
   await ArEntry.updateOne(
     { _id: entryId },
@@ -239,6 +285,8 @@ async function aggregateGroupedByIdentifier(matchFilter, skipGroups, limitGroups
             grossAmount: '$grossAmount',
             cgst: '$cgst',
             sgst: '$sgst',
+            /** Customer-level AI snapshot from POST /api/v1/ai/analyze/ar/:id */
+            agentAnalysis: '$agentAnalysis',
           },
         },
         totalCount: { $sum: 1 },
@@ -387,11 +435,46 @@ async function updateTrackingSummary(arEntryId, trackingStatus) {
   return { matched: result.modifiedCount ?? result.nModified ?? 0 };
 }
 
+async function setAgentAnalysis(arEntryId, lastAnalysisPayload) {
+  const oid = toObjectId(arEntryId);
+  if (!oid) return { matched: 0 };
+  const result = await ArEntry.updateOne(
+    { _id: oid },
+    {
+      $set: {
+        agentAnalysis: {
+          lastAnalysis: lastAnalysisPayload,
+          updatedAt: new Date(),
+        },
+      },
+    },
+  );
+  return { matched: result.modifiedCount ?? result.nModified ?? 0 };
+}
+
+async function setAgentAnalysisMany(arEntryIds, lastAnalysisPayload) {
+  const oids = [...new Set((arEntryIds || []).map((id) => toObjectId(id)).filter(Boolean))];
+  if (!oids.length) return { matched: 0 };
+  const result = await ArEntry.updateMany(
+    { _id: { $in: oids } },
+    {
+      $set: {
+        agentAnalysis: {
+          lastAnalysis: lastAnalysisPayload,
+          updatedAt: new Date(),
+        },
+      },
+    },
+  );
+  return { matched: result.modifiedCount ?? result.nModified ?? 0 };
+}
+
 module.exports = {
   pushLog,
   upsertPendingFromRaw,
   findById,
   findByIds,
+  findEntriesForCustomerGroup,
   setInvoiceNotFound,
   setInvoiceMatched,
   applyScoringUpdate,
@@ -404,4 +487,6 @@ module.exports = {
   markPdfGenerated,
   markPdfGeneratedMany,
   updateTrackingSummary,
+  setAgentAnalysis,
+  setAgentAnalysisMany,
 };

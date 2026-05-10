@@ -20,6 +20,14 @@ const arLogSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const agentAnalysisSchema = new mongoose.Schema(
+  {
+    lastAnalysis: { type: mongoose.Schema.Types.Mixed, default: null },
+    updatedAt: { type: Date, default: null },
+  },
+  { _id: false },
+);
+
 const arEntrySchema = new mongoose.Schema(
   {
     arId: { type: String, index: true },
@@ -93,6 +101,9 @@ const arEntrySchema = new mongoose.Schema(
     /** Latest milestone from AR tracking timeline (operational summary; workflow status stays in `status`). */
     trackingCurrentStatus: { type: String, default: '', index: true },
     trackingLastUpdatedAt: { type: Date, default: null, index: true },
+
+    /** Latest agentic AR analysis snapshot (POST /api/v1/ai/analyze/ar/:arId). */
+    agentAnalysis: { type: agentAnalysisSchema },
 
     logs: { type: [arLogSchema], default: [] },
   },

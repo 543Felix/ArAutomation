@@ -309,6 +309,24 @@ async function listEntries({ status, merchantId, outletId, fromDate, toDate, pag
   };
 }
 
+function shapeAiInsights(agentAnalysis) {
+  if (!agentAnalysis || !agentAnalysis.lastAnalysis) return null;
+  const la = agentAnalysis.lastAnalysis;
+  return {
+    updatedAt: agentAnalysis.updatedAt ?? null,
+    source: la.source ?? null,
+    currentStatus: la.currentStatus ?? null,
+    riskLevel: la.riskLevel ?? null,
+    customerIntent: la.customerIntent ?? null,
+    paymentLikelihood: la.paymentLikelihood ?? null,
+    summary: la.summary ?? null,
+    recommendedAction: la.recommendedAction ?? null,
+    customerScope: la.customerScope ?? null,
+    anchorArId: la.anchorArId ?? null,
+    generatedAt: la.generatedAt ?? null,
+  };
+}
+
 async function getEntryDetail(id) {
   const entry = await arEntryRepository.findById(id);
   if (!entry) {
@@ -316,6 +334,8 @@ async function getEntryDetail(id) {
   }
   return {
     entry,
+    /** Flattened AI agent snapshot (same data as `entry.agentAnalysis`, easier for clients). */
+    aiInsights: shapeAiInsights(entry.agentAnalysis),
     missingDocuments: {
       checkCount: entry.missingChecks,
       checkNos: entry.missingCheckNos,
