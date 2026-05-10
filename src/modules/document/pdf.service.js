@@ -11,6 +11,7 @@ const logger = require('../../utils/logger');
 const AppError = require('../../utils/app-error');
 const { AR_STATUS } = require('../ar/ar.constants');
 const { FILES_PUBLIC_PREFIX } = require('../../config/api-constants');
+const aiService = require('../ai/ai.service');
 
 function getStorageDir() {
   return process.env.STORAGE_DIR || path.resolve(process.cwd(), 'storage');
@@ -58,6 +59,60 @@ async function buildCoverLetter({ entry, invoice, checks }) {
   draw(`Invoice document: ${invoice?.pdfDocId || 'n/a'}`, 50, y);
   y -= 14;
   draw(`Checks: ${(checks || []).map((c) => c.checkNo).join(', ') || 'n/a'}`, 50, y);
+
+  return Buffer.from(await pdf.save());
+}
+
+/**
+ * Renders a plain-text cover letter (e.g. AI service output) to a single-column
+ * A4 PDF with simple word-wrap and pagination.
+ */
+async function renderCoverLetterPdfFromText(text) {
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+
+  const pageSize = [595, 842];
+  const margin = 50;
+  const fontSize = 11;
+  const lineHeight = fontSize * 1.4;
+  const maxWidth = pageSize[0] - margin * 2;
+
+  const wrapLine = (line) => {
+    if (!line) return [''];
+    const words = line.split(/\s+/);
+    const out = [];
+    let current = '';
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (font.widthOfTextAtSize(candidate, fontSize) <= maxWidth) {
+        current = candidate;
+      } else {
+        if (current) out.push(current);
+        current = word;
+      }
+    }
+    if (current) out.push(current);
+    return out.length ? out : [''];
+  };
+
+  const lines = String(text || '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .flatMap(wrapLine);
+
+  let page = pdf.addPage(pageSize);
+  let y = pageSize[1] - margin;
+
+  for (const line of lines) {
+    if (y < margin) {
+      page = pdf.addPage(pageSize);
+      y = pageSize[1] - margin;
+    }
+    if (line) {
+      page.drawText(line, { x: margin, y, size: fontSize, font });
+    }
+    y -= lineHeight;
+  }
 
   return Buffer.from(await pdf.save());
 }
@@ -152,9 +207,28 @@ async function renderPlaceholder(payload) {
   return { format: 'pdf', stub: true };
 }
 
+/**
+ * Build the cover-letter PDF from an AI-refined (or template-rendered) text body.
+ * Falls back to the deterministic template if AI is disabled or fails — see
+ * `ai.service.generateCoverLetter`.
+ */
+async function buildAiCoverLetter(coverLetterData) {
+  const { coverLetterText, source, missingPlaceholders } =
+    await aiService.generateCoverLetter(coverLetterData);
+  logger.info('Cover letter generated', {
+    source,
+    chars: coverLetterText.length,
+    missingPlaceholderCount: missingPlaceholders.length,
+  });
+  const buffer = await renderCoverLetterPdfFromText(coverLetterText);
+  return { buffer, coverLetterText, source };
+}
+
 module.exports = {
   generateAndAttachPdf,
   buildCoverLetter,
+  buildAiCoverLetter,
+  renderCoverLetterPdfFromText,
   mergePdfs,
   saveMergedPdf,
   renderPlaceholder,
