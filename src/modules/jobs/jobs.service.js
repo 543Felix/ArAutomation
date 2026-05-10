@@ -5,8 +5,13 @@ const { ExpressAdapter } = require('@bull-board/express');
 const logger = require('../../utils/logger');
 const arProcessingQueueService = require('./ar-processing/queue.service');
 const pdfCreationQueueService = require('./pdf-creation/queue.service');
+const emailQueueService = require('../../queues/email.queue');
 
-const QUEUE_SERVICES = [arProcessingQueueService, pdfCreationQueueService];
+const QUEUE_SERVICES = [
+  arProcessingQueueService,
+  pdfCreationQueueService,
+  emailQueueService,
+];
 
 const defaultJobConfig = {
   enabled: true,

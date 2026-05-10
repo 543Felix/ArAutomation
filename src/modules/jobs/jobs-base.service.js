@@ -4,6 +4,7 @@ const logger = require('../../utils/logger');
 const QUEUES = {
   SCHEDULE_AR_PROCESSING: 'ar-processing',
   SCHEDULE_PDF_CREATION: 'pdf-creation',
+  EMAIL_QUEUE: 'EMAIL_QUEUE',
 };
 
 /**

@@ -166,13 +166,63 @@ function buildUserPrompt({ renderedLetter, missingDocuments }) {
   return parts.join('\n');
 }
 
+const COLLECTION_EMAIL_SYSTEM_PROMPT = [
+  'You write concise professional B2B collection emails for Accounts Receivable.',
+  '',
+  'RULES:',
+  '- Polite, factual tone. No threats or aggressive language.',
+  '- Mention invoice reference(s), amount, and due date exactly as given.',
+  '- Subject line MUST include the company name and business date exactly as provided (when provided).',
+  '- Body greeting must address the company by name (not guest/personal name).',
+  '- If missing documents are listed, include ONE short paragraph asking for them.',
+  '- Output VALID JSON ONLY with keys "subject" (string) and "body" (plain-text email body, no HTML).',
+  '- Do not invent amounts, dates, or invoice numbers.',
+].join('\n');
+
+function buildCollectionEmailUserPrompt(data = {}) {
+  const invoice = data.invoiceNo != null ? String(data.invoiceNo) : '';
+  const amount = data.amount != null ? String(data.amount) : '';
+  const dueDate = data.dueDate != null ? String(data.dueDate) : '';
+  const company =
+    (data.companyName != null && String(data.companyName).trim()) ||
+    (data.customerName != null && String(data.customerName).trim()) ||
+    '';
+  const businessDate = data.businessDate != null ? String(data.businessDate).trim() : '';
+
+  const missing =
+    Array.isArray(data.missingDocuments) && data.missingDocuments.length
+      ? data.missingDocuments.filter((d) => d && String(d).trim()).map((d) => `- ${String(d).trim()}`)
+      : [];
+
+  return [
+    'Generate a professional invoice follow-up email JSON.',
+    '',
+    `Invoice: ${invoice}`,
+    `Amount: ${amount}`,
+    `Due Date: ${dueDate || '(not specified — refer to agreed credit terms)'}`,
+    company ? `Company name (subject + greeting): ${company}` : '',
+    businessDate ? `Business date (must appear in subject): ${businessDate}` : '',
+    '',
+    'Missing Documents:',
+    missing.length ? missing.join('\n') : '(none)',
+    '',
+    'Tone: polite.',
+    '',
+    'Respond with JSON: {"subject":"...","body":"..."}',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
 module.exports = {
   COVER_LETTER_TEMPLATE,
   MANDATORY_PLACEHOLDERS,
   OPTIONAL_PLACEHOLDERS,
   DEFAULTS,
   SYSTEM_PROMPT,
+  COLLECTION_EMAIL_SYSTEM_PROMPT,
   renderTemplate,
   findMissingPlaceholders,
   buildUserPrompt,
+  buildCollectionEmailUserPrompt,
 };

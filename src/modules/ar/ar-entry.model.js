@@ -34,6 +34,37 @@ const arEntrySchema = new mongoose.Schema(
     outletId: { type: mongoose.Schema.Types.ObjectId, required: true, index: true },
     amount: { type: Number, default: 0 },
 
+    /** Ecobillz `/ar-posted-entries` row `_id` (external system) */
+    sourceRowId: { type: String, index: true },
+    /** Document / bill no. from API (`no`) */
+    documentNo: { type: String, index: true },
+    guestFullName: { type: String },
+    guestId: { type: String, index: true },
+    /** Corporate / ledger identifier (e.g. `identifier`) */
+    billingIdentifier: { type: String, index: true },
+    roomNo: { type: String },
+    taxInvoiceNo: { type: String, index: true },
+    /** Tax invoice date from API field `date` (may align with `invoiceDate`) */
+    taxInvoiceDate: { type: Date },
+    confirmationNo: { type: String },
+    lineDescription: { type: String },
+    transCode: { type: String },
+    reservationNo: { type: String },
+    remarks: { type: String },
+    outletChecks: { type: mongoose.Schema.Types.Mixed },
+    companyName: { type: String, index: true },
+    /** Guest/customer snapshot from API e.g. `{ address1 }` */
+    customer: { type: mongoose.Schema.Types.Mixed },
+    folioType: { type: String },
+    hsnDescription: { type: String },
+    hsnCode: { type: String },
+    grossAmount: { type: Number },
+    cgst: { type: Number },
+    sgst: { type: Number },
+    /** External API timestamps when present on the row */
+    sourceCreatedAt: { type: Date },
+    sourceUpdatedAt: { type: Date },
+
     /** Passed through from Ecobillz `/get-cheques` lookups where upstream supplied cheque rows */
     chequeDetails: { type: [chequeDetailSchema], default: [] },
 
@@ -54,6 +85,14 @@ const arEntrySchema = new mongoose.Schema(
     confidenceScore: { type: Number, default: 0, min: 0, max: 1 },
 
     finalPdfUrl: { type: String, default: null },
+
+    emailSentAt: { type: Date, default: null },
+    lastEmailSubject: { type: String, default: '' },
+    lastEmailBody: { type: String, default: '' },
+
+    /** Latest milestone from AR tracking timeline (operational summary; workflow status stays in `status`). */
+    trackingCurrentStatus: { type: String, default: '', index: true },
+    trackingLastUpdatedAt: { type: Date, default: null, index: true },
 
     logs: { type: [arLogSchema], default: [] },
   },

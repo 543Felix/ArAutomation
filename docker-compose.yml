@@ -2,10 +2,10 @@ services:
   api:
     build: .
     ports:
-      - "${PORT:-3000}:3000"
+      - "${PORT:-3002}:3002"
     environment:
       NODE_ENV: production
-      PORT: 3000
+      PORT: 3002
       MONGO_URI: mongodb://mongo:27017/arautomation
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}

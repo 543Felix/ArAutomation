@@ -8,6 +8,8 @@ const invoiceSchema = new mongoose.Schema(
     outletId: { type: mongoose.Schema.Types.ObjectId, required: true, index: true },
     amount: { type: Number, default: 0 },
     pdfDocId: { type: String, index: true },
+    /** From Ecobillz tax-invoice API: absolute URL or server filesystem path to PDF */
+    pdfUrl: { type: String, default: '' },
   },
   {
     timestamps: true,

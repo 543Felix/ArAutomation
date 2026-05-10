@@ -39,6 +39,7 @@ const sendEmail = {
   }),
   body: Joi.object({
     to: Joi.string().email().optional(),
+    customerEmail: Joi.string().email().optional(),
     subject: Joi.string().max(500).optional(),
     body: Joi.string().max(10000).optional(),
   }).default({}),

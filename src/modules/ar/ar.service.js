@@ -16,6 +16,7 @@ const {
   AR_LOG_LEVEL,
   CONFIDENCE_THRESHOLD,
 } = require('./ar.constants');
+const { companyPdfBundleKey } = require('./ar-bundle-key.util');
 
 function startOfYesterdayUtc(now = new Date()) {
   const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
@@ -169,12 +170,6 @@ async function processArEntry(arEntryId) {
     },
   );
 
-  if (nextStatus === AR_STATUS.READY_FOR_PDF) {
-    const pdfQueueService = require('../jobs/pdf-creation/queue.service');
-    await pdfQueueService.schedulePdfCreation({ arEntryId: String(entry._id) });
-    await pushLog(entry._id, 'pdf.enqueue', 'Enqueued PDF creation job');
-  }
-
   return {
     arEntryId: String(entry._id),
     status: nextStatus,
@@ -230,6 +225,31 @@ async function processForTarget({ merchantId, outletId, fromDate, toDate }) {
     }
   }
 
+  const readyIds = results
+    .filter((r) => r.status === AR_STATUS.READY_FOR_PDF)
+    .map((r) => r.arEntryId)
+    .filter(Boolean);
+
+  if (readyIds.length > 0) {
+    const pdfQueueService = require('../jobs/pdf-creation/queue.service');
+    const entries = await arEntryRepository.findByIds(readyIds);
+    const groups = new Map();
+    for (const e of entries) {
+      const k = companyPdfBundleKey(e);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(String(e._id));
+    }
+    for (const groupIds of groups.values()) {
+      groupIds.sort();
+      await pdfQueueService.schedulePdfCreation({ arEntryIds: groupIds });
+      await pushLog(
+        groupIds[0],
+        'pdf.enqueue',
+        `Enqueued company PDF job (${groupIds.length} invoice(s))`,
+      );
+    }
+  }
+
   return { processed: results.length, results };
 }
 
@@ -270,12 +290,23 @@ async function listEntries({ status, merchantId, outletId, fromDate, toDate, pag
   const skip = (Math.max(1, Number(page)) - 1) * Math.max(1, Number(limit));
   const lim = Math.min(200, Math.max(1, Number(limit)));
 
-  const [entries, total] = await Promise.all([
-    arEntryRepository.findPage(filter, skip, lim),
+  const [{ groups, identifierTotal }, arEntryCount] = await Promise.all([
+    arEntryRepository.aggregateGroupedByIdentifier(filter, skip, lim),
     arEntryRepository.count(filter),
   ]);
 
-  return { entries, total, page: Number(page), limit: lim };
+  /**
+   * Same shape as Ecobillz ARPosted aggregate: one doc per company `identifier`,
+   * each with `customer[]` grouped by `guestId`, each with `rows`, `count`, `total`.
+   * `total` is the number of identifier buckets matching the filter (for pagination).
+   */
+  return {
+    entries: groups,
+    total: identifierTotal,
+    arEntryCount,
+    page: Number(page),
+    limit: lim,
+  };
 }
 
 async function getEntryDetail(id) {

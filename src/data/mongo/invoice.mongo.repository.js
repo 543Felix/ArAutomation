@@ -21,6 +21,8 @@ async function upsertFromEcobillz(doc, merchantId, outletId) {
   const invoiceNo = doc.no ?? doc.taxInvoiceNo ?? doc.invoiceNo;
   if (!invoiceNo) return null;
 
+  const pdfUrlRaw = doc.pdfUrl != null ? String(doc.pdfUrl).trim() : '';
+
   const patch = {
     merchantId,
     outletId,
@@ -28,6 +30,7 @@ async function upsertFromEcobillz(doc, merchantId, outletId) {
     ...(doc.date ? { invoiceDate: new Date(doc.date) } : {}),
     amount: Number(doc.total) || 0,
     ...(doc.pdfDocId ? { pdfDocId: String(doc.pdfDocId) } : {}),
+    ...(pdfUrlRaw ? { pdfUrl: pdfUrlRaw } : {}),
   };
 
   return Invoice.findOneAndUpdate(

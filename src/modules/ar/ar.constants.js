@@ -16,6 +16,10 @@ const PDF_JOB_NAMES = Object.freeze({
   CREATE: 'PDF_CREATION_JOB',
 });
 
+const EMAIL_JOB_NAMES = Object.freeze({
+  SEND: 'SEND_EMAIL_JOB',
+});
+
 const AR_LOG_LEVEL = Object.freeze({
   INFO: 'info',
   WARN: 'warn',
@@ -29,6 +33,7 @@ module.exports = {
   AR_STATUS,
   AR_JOB_NAMES,
   PDF_JOB_NAMES,
+  EMAIL_JOB_NAMES,
   AR_LOG_LEVEL,
   CONFIDENCE_THRESHOLD,
   DEFAULT_INVOICE_DATE_PROXIMITY_DAYS,

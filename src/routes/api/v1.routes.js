@@ -8,6 +8,8 @@ const documentRoutes = require('../../modules/document/document.routes');
 const matchingRoutes = require('../../modules/matching/matching.routes');
 const emailRoutes = require('../../modules/email/email.routes');
 const ecobillzRoutes = require('../../modules/ecobillz/ecobillz.routes');
+const companyRoutes = require('../../modules/company/company.routes');
+const trackingRoutes = require('../../modules/tracking/tracking.routes');
 
 const router = express.Router();
 
@@ -19,6 +21,8 @@ router.get('/health', (_req, res) => {
 
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
+router.use('/companies', companyRoutes);
+router.use('/tracking', trackingRoutes);
 router.use('/ar-entries', arRoutes);
 router.use('/invoice', invoiceRoutes);
 router.use('/document', documentRoutes);

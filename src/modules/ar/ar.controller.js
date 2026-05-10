@@ -23,14 +23,8 @@ const detail = asyncHandler(async (req, res) => {
 });
 
 const sendEmail = asyncHandler(async (req, res) => {
-  const summary = await arService.markEmailSent(req.params.id);
-  await emailService.queueOutbound({
-    to: req.body?.to,
-    subject: req.body?.subject || `AR ${summary.id}`,
-    body: req.body?.body || 'Please find the attached AR statement.',
-    attachmentUrl: summary.finalPdfUrl,
-  });
-  res.status(202).json(summary);
+  const result = await emailService.enqueueManualSendForArEntry(req.params.id, req.body);
+  res.status(202).json(result);
 });
 
 const triggerRun = asyncHandler(async (req, res) => {

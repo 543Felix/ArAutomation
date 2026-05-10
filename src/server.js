@@ -6,7 +6,7 @@ const jobsService = require('./modules/jobs/jobs.service');
 const logger = require('./utils/logger');
 const { API_BASE_PATH } = require('./config/api-constants');
 
-const port = Number(process.env.PORT) || 3000;
+const port = Number(process.env.PORT) || 3002;
 
 async function start() {
   await connectDb();

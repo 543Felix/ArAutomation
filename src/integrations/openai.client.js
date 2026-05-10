@@ -3,6 +3,8 @@ const logger = require('../utils/logger');
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 const DEFAULT_TIMEOUT_MS = 20_000;
 
+const LOG_PREFIX = '[openai]';
+
 function getConfig() {
   return {
     apiKey: (process.env.OPENAI_API_KEY || '').trim(),
@@ -10,6 +12,14 @@ function getConfig() {
     baseUrl: (process.env.OPENAI_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, ''),
     timeoutMs: Number(process.env.OPENAI_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS,
   };
+}
+
+function hostFromUrl(urlStr) {
+  try {
+    return new URL(urlStr).host;
+  } catch {
+    return '(invalid-url)';
+  }
 }
 
 function isConfigured() {
@@ -21,7 +31,13 @@ function isConfigured() {
  * Throws on non-2xx, network, or shape errors. Caller is expected to wrap
  * in a try/catch and apply a failsafe — this module does not silence errors.
  */
-async function chatComplete({ system, user, temperature = 0, maxTokens = 1500 }) {
+async function chatComplete({
+  system,
+  user,
+  temperature = 0,
+  maxTokens = 1500,
+  responseFormat,
+}) {
   const cfg = getConfig();
   if (!cfg.apiKey) {
     const err = new Error('OPENAI_API_KEY is not configured');
@@ -33,6 +49,21 @@ async function chatComplete({ system, user, temperature = 0, maxTokens = 1500 })
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
 
+  const systemLen = typeof system === 'string' ? system.length : 0;
+  const userLen = typeof user === 'string' ? user.length : 0;
+
+  logger.info(`${LOG_PREFIX} chat.completions request`, {
+    step: 'request',
+    model: cfg.model,
+    host: hostFromUrl(cfg.baseUrl),
+    timeoutMs: cfg.timeoutMs,
+    systemCharCount: systemLen,
+    userCharCount: userLen,
+    temperature,
+    maxTokens,
+  });
+
+  const started = Date.now();
   let res;
   try {
     res = await fetch(url, {
@@ -45,6 +76,9 @@ async function chatComplete({ system, user, temperature = 0, maxTokens = 1500 })
         model: cfg.model,
         temperature,
         max_tokens: maxTokens,
+        ...(responseFormat === 'json_object'
+          ? { response_format: { type: 'json_object' } }
+          : {}),
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: user },
@@ -55,10 +89,20 @@ async function chatComplete({ system, user, temperature = 0, maxTokens = 1500 })
   } catch (err) {
     clearTimeout(timer);
     if (err.name === 'AbortError') {
+      logger.warn(`${LOG_PREFIX} request aborted (timeout)`, {
+        step: 'error',
+        timeoutMs: cfg.timeoutMs,
+        durationMs: Date.now() - started,
+      });
       const e = new Error(`OpenAI request timed out after ${cfg.timeoutMs}ms`);
       e.code = 'OPENAI_TIMEOUT';
       throw e;
     }
+    logger.warn(`${LOG_PREFIX} network error`, {
+      step: 'error',
+      durationMs: Date.now() - started,
+      error: logger.serializeError(err),
+    });
     throw err;
   }
   clearTimeout(timer);
@@ -72,6 +116,15 @@ async function chatComplete({ system, user, temperature = 0, maxTokens = 1500 })
   }
 
   if (!res.ok) {
+    logger.warn(`${LOG_PREFIX} HTTP error`, {
+      step: 'error',
+      status: res.status,
+      durationMs: Date.now() - started,
+      bodyPreview:
+        typeof body === 'object' && body !== null
+          ? JSON.stringify(body).slice(0, 400)
+          : String(body).slice(0, 400),
+    });
     const err = new Error(`OpenAI HTTP ${res.status} ${res.statusText}`);
     err.status = res.status;
     err.body = body;
@@ -81,14 +134,23 @@ async function chatComplete({ system, user, temperature = 0, maxTokens = 1500 })
 
   const content = body?.choices?.[0]?.message?.content;
   if (typeof content !== 'string' || !content.trim()) {
+    logger.warn(`${LOG_PREFIX} empty message content in response`, {
+      step: 'error',
+      durationMs: Date.now() - started,
+      choicesLength: body?.choices?.length,
+    });
     const err = new Error('OpenAI response missing message content');
     err.code = 'OPENAI_EMPTY_RESPONSE';
     err.body = body;
     throw err;
   }
 
-  logger.debug('OpenAI chat complete', {
+  const durationMs = Date.now() - started;
+  logger.info(`${LOG_PREFIX} chat.completions ok`, {
+    step: 'response',
+    durationMs,
     model: cfg.model,
+    contentCharCount: content.trim().length,
     usage: body?.usage,
   });
 

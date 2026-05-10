@@ -10,5 +10,6 @@ router.get('/status', emailController.status);
 
 router.use(authMiddleware);
 router.post('/enqueue', validate(emailValidation.enqueue), emailController.enqueue);
+router.post('/send/:arId', validate(emailValidation.sendForAr), emailController.sendForAr);
 
 module.exports = router;

@@ -12,6 +12,7 @@ router.get('/', (_req, res) => {
       api: {
         basePath: API_BASE_PATH,
         health: `${API_BASE_PATH}/health`,
+        tracking: `${API_BASE_PATH}/tracking`,
       },
     },
   });

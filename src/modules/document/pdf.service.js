@@ -12,6 +12,20 @@ const AppError = require('../../utils/app-error');
 const { AR_STATUS } = require('../ar/ar.constants');
 const { FILES_PUBLIC_PREFIX } = require('../../config/api-constants');
 const aiService = require('../ai/ai.service');
+const { companyPdfBundleKey } = require('../ar/ar-bundle-key.util');
+const {
+  buildCoverLetterGroupPayload,
+  buildCoverLetterJobPayload,
+} = require('./cover-letter.payload');
+const trackingService = require('../tracking/tracking.service');
+
+async function safeTracking(tag, fn) {
+  try {
+    await fn();
+  } catch (err) {
+    logger.warn(`[pdf][tracking] ${tag}`, { error: logger.serializeError(err) });
+  }
+}
 
 function getStorageDir() {
   return process.env.STORAGE_DIR || path.resolve(process.cwd(), 'storage');
@@ -56,7 +70,11 @@ async function buildCoverLetter({ entry, invoice, checks }) {
   y -= 10;
   draw('Linked Documents', 50, y, 13, bold);
   y -= 18;
-  draw(`Invoice document: ${invoice?.pdfDocId || 'n/a'}`, 50, y);
+  draw(
+    `Invoice PDF: ${invoice?.pdfUrl || invoice?.pdfDocId || 'n/a'}`,
+    50,
+    y,
+  );
   y -= 14;
   draw(`Checks: ${(checks || []).map((c) => c.checkNo).join(', ') || 'n/a'}`, 50, y);
 
@@ -148,10 +166,45 @@ async function fetchPdfByDocId(docId) {
   }
 }
 
-async function saveMergedPdf(arEntryId, bytes) {
+/**
+ * Prefer Ecobillz `pdfUrl` (HTTP(S) or local path), then document-store `pdfDocId`.
+ */
+async function fetchInvoicePdfBuffer(invoice) {
+  if (!invoice) return null;
+
+  const raw = invoice.pdfUrl != null ? String(invoice.pdfUrl).trim() : '';
+  if (raw) {
+    if (/^https?:\/\//i.test(raw)) {
+      try {
+        return await documentsClient.downloadPdfBytes(raw);
+      } catch (err) {
+        logger.warn('Invoice pdfUrl HTTP fetch failed', { message: err.message });
+      }
+    } else {
+      try {
+        const filePath = path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
+        return await fs.readFile(filePath);
+      } catch (err) {
+        logger.warn('Invoice pdfUrl file read failed', { path: raw, message: err.message });
+      }
+    }
+  }
+
+  if (invoice.pdfDocId) {
+    return fetchPdfByDocId(invoice.pdfDocId);
+  }
+  return null;
+}
+
+async function saveMergedPdf(arEntryId, bytes, options = {}) {
   const dir = path.join(getStorageDir(), 'ar-pdfs');
   await fs.mkdir(dir, { recursive: true });
-  const filename = `ar-${arEntryId}-${Date.now()}.pdf`;
+  const n = options.bundleInvoiceCount;
+  const stem =
+    typeof n === 'number' && n > 1
+      ? `company-${String(arEntryId)}-${n}inv`
+      : String(arEntryId);
+  const filename = `ar-${stem}-${Date.now()}.pdf`;
   const filePath = path.join(dir, filename);
   await fs.writeFile(filePath, bytes);
   const relativeUrl = `${FILES_PUBLIC_PREFIX}/ar-pdfs/${filename}`;
@@ -159,45 +212,118 @@ async function saveMergedPdf(arEntryId, bytes) {
   return base ? `${base.replace(/\/$/, '')}${relativeUrl}` : relativeUrl;
 }
 
-/**
- * Full PDF creation pipeline for a given AR entry.
- * Loads invoice + checks, fetches their s3 PDFs, builds a cover letter,
- * merges them, persists the file, and updates the AR entry status.
- */
-async function generateAndAttachPdf(arEntryId) {
-  const entry = await arEntryRepository.findById(arEntryId);
-  if (!entry) {
-    throw new AppError(`AR entry ${arEntryId} not found`, 404);
+function normalizeArEntryIds(arEntryIdOrIds) {
+  if (Array.isArray(arEntryIdOrIds)) {
+    return [...new Set(arEntryIdOrIds.map(String).filter(Boolean))];
   }
-  if (entry.status !== AR_STATUS.READY_FOR_PDF && entry.status !== AR_STATUS.PDF_GENERATED) {
-    throw new AppError(`AR entry status=${entry.status} not eligible for PDF generation`, 409);
+  if (arEntryIdOrIds != null && String(arEntryIdOrIds).trim()) {
+    return [String(arEntryIdOrIds).trim()];
+  }
+  return [];
+}
+
+function sortEntriesForBundle(entries) {
+  return [...entries].sort((a, b) => {
+    const na = String(a.invoiceNo ?? '');
+    const nb = String(b.invoiceNo ?? '');
+    const c = na.localeCompare(nb, undefined, { numeric: true });
+    if (c !== 0) return c;
+    return String(a._id).localeCompare(String(b._id));
+  });
+}
+
+/**
+ * Builds one cover letter for the company group, then appends each AR row's
+ * invoice PDF and linked cheque PDFs in invoice order.
+ */
+async function generateAndAttachPdf(arEntryIdOrIds) {
+  const ids = normalizeArEntryIds(arEntryIdOrIds);
+  if (!ids.length) {
+    throw new AppError('At least one arEntryId is required for PDF generation', 400);
   }
 
-  const invoice = entry.invoiceRefId
-    ? await invoiceService.findByIdLean(entry.invoiceRefId)
-    : null;
-  const checks = await checkService.findChecksForInvoice({
-    invoiceNo: entry.invoiceNo,
-    merchantId: entry.merchantId,
-    outletId: entry.outletId,
+  const found = await arEntryRepository.findByIds(ids);
+  if (found.length !== ids.length) {
+    throw new AppError('One or more AR entries were not found', 404);
+  }
+
+  const eligible = found.filter(
+    (e) => e.status === AR_STATUS.READY_FOR_PDF || e.status === AR_STATUS.PDF_GENERATED,
+  );
+  if (eligible.length !== found.length) {
+    throw new AppError(
+      'All AR entries must be READY_FOR_PDF or PDF_GENERATED to build merged PDF',
+      409,
+    );
+  }
+
+  const bundleKey = companyPdfBundleKey(eligible[0]);
+  for (const e of eligible) {
+    if (companyPdfBundleKey(e) !== bundleKey) {
+      throw new AppError(
+        'All AR entries in one PDF job must share merchant, outlet, and billing identifier (or company name)',
+        422,
+      );
+    }
+  }
+
+  const sortedEntries = sortEntriesForBundle(eligible);
+  const rows = [];
+  for (const entry of sortedEntries) {
+    const invoice = entry.invoiceRefId
+      ? await invoiceService.findByIdLean(entry.invoiceRefId)
+      : null;
+    const checks = await checkService.findChecksForInvoice({
+      invoiceNo: entry.invoiceNo,
+      merchantId: entry.merchantId,
+      outletId: entry.outletId,
+    });
+    rows.push({ entry, invoice, checks });
+  }
+
+  const coverLetterData = buildCoverLetterGroupPayload(rows);
+  const { buffer: cover } = await buildAiCoverLetter(coverLetterData);
+
+  await safeTracking('cover_letter', () =>
+    trackingService.recordCoverLetterForEntries(sortedEntries),
+  );
+
+  const bodyBuffers = [];
+  for (const { invoice, checks } of rows) {
+    const invoicePdf = await fetchInvoicePdfBuffer(invoice);
+    if (invoicePdf) bodyBuffers.push(invoicePdf);
+    for (const c of checks) {
+      if (!c.pdfDocId) continue;
+      const buf = await fetchPdfByDocId(c.pdfDocId);
+      if (buf) bodyBuffers.push(buf);
+    }
+  }
+
+  const merged = await mergePdfs([cover, ...bodyBuffers]);
+  const primaryId = String(sortedEntries[0]._id);
+  const bundleInvoiceCount = sortedEntries.length;
+  const finalPdfUrl = await saveMergedPdf(primaryId, merged, {
+    bundleInvoiceCount,
   });
 
-  const cover = await buildCoverLetter({ entry, invoice, checks });
+  const entryObjectIds = sortedEntries.map((e) => e._id);
+  await arEntryRepository.markPdfGeneratedMany(entryObjectIds, finalPdfUrl);
 
-  const invoicePdf = invoice?.pdfDocId ? await fetchPdfByDocId(invoice.pdfDocId) : null;
-  const checkPdfs = [];
-  for (const c of checks) {
-    if (!c.pdfDocId) continue;
-    const buf = await fetchPdfByDocId(c.pdfDocId);
-    if (buf) checkPdfs.push(buf);
+  await safeTracking('pdf_generated', () =>
+    trackingService.recordPdfGeneratedForEntries(sortedEntries, finalPdfUrl),
+  );
+
+  try {
+    const { scheduleSendEmailAfterPdf } = require('../jobs/email.job');
+    await scheduleSendEmailAfterPdf(sortedEntries, finalPdfUrl);
+  } catch (err) {
+    logger.warn('[pdf] enqueue outbound email failed', { error: logger.serializeError(err) });
   }
 
-  const merged = await mergePdfs([cover, invoicePdf, ...checkPdfs].filter(Boolean));
-  const finalPdfUrl = await saveMergedPdf(String(entry._id), merged);
-
-  await arEntryRepository.markPdfGenerated(entry._id, finalPdfUrl);
-
-  return { arEntryId: String(entry._id), finalPdfUrl };
+  return {
+    arEntryIds: sortedEntries.map((e) => String(e._id)),
+    finalPdfUrl,
+  };
 }
 
 async function renderPlaceholder(payload) {
@@ -213,20 +339,37 @@ async function renderPlaceholder(payload) {
  * `ai.service.generateCoverLetter`.
  */
 async function buildAiCoverLetter(coverLetterData) {
+  logger.info('[cover-letter] pdf.wrap — generating text', {
+    stage: 'pdf.before_ai',
+    payloadKeys: coverLetterData ? Object.keys(coverLetterData) : [],
+  });
+
   const { coverLetterText, source, missingPlaceholders } =
     await aiService.generateCoverLetter(coverLetterData);
-  logger.info('Cover letter generated', {
+
+  logger.info('[cover-letter] pdf.wrap — text ready', {
+    stage: 'pdf.after_ai',
     source,
-    chars: coverLetterText.length,
+    coverLetterCharCount: coverLetterText.length,
     missingPlaceholderCount: missingPlaceholders.length,
   });
+
   const buffer = await renderCoverLetterPdfFromText(coverLetterText);
+
+  logger.info('[cover-letter] pdf.wrap — PDF bytes built', {
+    stage: 'pdf.after_render',
+    pdfByteLength: buffer.length,
+    source,
+  });
+
   return { buffer, coverLetterText, source };
 }
 
 module.exports = {
   generateAndAttachPdf,
+  normalizeArEntryIds,
   buildCoverLetter,
+  buildCoverLetterJobPayload,
   buildAiCoverLetter,
   renderCoverLetterPdfFromText,
   mergePdfs,

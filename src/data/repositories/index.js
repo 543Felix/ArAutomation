@@ -14,7 +14,9 @@ if (driver !== 'mongo') {
 module.exports = {
   driver,
   userRepository: require('../mongo/user.mongo.repository'),
+  companyRepository: require('../mongo/company.mongo.repository'),
   arEntryRepository: require('../mongo/ar-entry.mongo.repository'),
+  arTrackingRepository: require('../mongo/ar-tracking.mongo.repository'),
   invoiceRepository: require('../mongo/invoice.mongo.repository'),
   checkRepository: require('../mongo/check.mongo.repository'),
   pdfDocumentRepository: require('../mongo/pdf-document.mongo.repository'),

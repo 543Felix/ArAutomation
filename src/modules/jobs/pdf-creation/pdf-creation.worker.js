@@ -18,18 +18,24 @@ async function jobHandler(job) {
     throw new UnrecoverableError(`Unknown PDF job name: ${job.name}`);
   }
 
-  const { arEntryId } = job.data || {};
-  if (!arEntryId) {
-    throw new UnrecoverableError('arEntryId is required for PDF_CREATION_JOB');
+  const raw = job.data || {};
+  const ids =
+    Array.isArray(raw.arEntryIds) && raw.arEntryIds.length > 0
+      ? [...new Set(raw.arEntryIds.map(String).filter(Boolean))]
+      : raw.arEntryId != null && String(raw.arEntryId).trim()
+        ? [String(raw.arEntryId).trim()]
+        : [];
+  if (!ids.length) {
+    throw new UnrecoverableError('arEntryIds (or legacy arEntryId) required for PDF_CREATION_JOB');
   }
 
   try {
-    return await pdfService.generateAndAttachPdf(arEntryId);
+    return await pdfService.generateAndAttachPdf(ids);
   } catch (err) {
     logger.error('PDF worker job failed', {
       queue: worker?.qualifiedName,
       jobId: job.id,
-      arEntryId,
+      arEntryIds: ids,
       error: logger.serializeError(err),
     });
     throw err;

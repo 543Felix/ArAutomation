@@ -1,5 +1,7 @@
 const Joi = require('joi');
 
+const objectId = Joi.string().hex().length(24);
+
 const enqueue = {
   body: Joi.object({
     to: Joi.string().email().optional(),
@@ -11,6 +13,19 @@ const enqueue = {
     .default({}),
 };
 
+const sendForAr = {
+  params: Joi.object({
+    arId: objectId.required(),
+  }),
+  body: Joi.object({
+    to: Joi.string().email().optional(),
+    customerEmail: Joi.string().email().optional(),
+  })
+    .unknown(false)
+    .default({}),
+};
+
 module.exports = {
   enqueue,
+  sendForAr,
 };

@@ -24,17 +24,23 @@ const defaultJobOptions = {
   removeOnFail: { count: 100 },
 };
 
-async function schedulePdfCreation({ arEntryId }) {
-  if (!arEntryId) {
-    throw new Error('arEntryId is required to schedule PDF_CREATION_JOB');
+async function schedulePdfCreation({ arEntryId, arEntryIds } = {}) {
+  const ids =
+    Array.isArray(arEntryIds) && arEntryIds.length > 0
+      ? [...new Set(arEntryIds.map(String).filter(Boolean))]
+      : arEntryId != null && String(arEntryId).trim()
+        ? [String(arEntryId).trim()]
+        : [];
+  if (!ids.length) {
+    throw new Error('arEntryId or non-empty arEntryIds is required to schedule PDF_CREATION_JOB');
   }
 
   const job = await ensureQueue().add(
     PDF_JOB_NAMES.CREATE,
-    { arEntryId, scheduledAt: new Date() },
+    { arEntryIds: ids, scheduledAt: new Date() },
     defaultJobOptions,
   );
-  logger.info('PDF job scheduled', { jobId: job.id, arEntryId });
+  logger.info('PDF job scheduled', { jobId: job.id, arEntryIds: ids });
   return job.id;
 }
 
