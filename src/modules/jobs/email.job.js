@@ -103,6 +103,18 @@ async function buildEmailJobPayloadFromEntries(entries, finalPdfUrl) {
   };
 }
 
+async function resolveRecipientEmailForArEntry(entry) {
+  if (!entry) return '';
+  const companyEmail = await resolveCompanyRecipientEmail(entry);
+  return (
+    companyEmail ||
+    extractCustomerEmail(entry) ||
+    (process.env.AR_COLLECTION_EMAIL_DEFAULT_TO || '').trim() ||
+    (process.env.COLLECTION_EMAIL_DEFAULT_TO || '').trim() ||
+    ''
+  );
+}
+
 /**
  * After merged PDF is saved — enqueue collection email when recipient is known.
  * @returns {Promise<string|null>} job id or null when skipped
@@ -129,4 +141,5 @@ module.exports = {
   buildEmailJobPayloadFromEntries,
   scheduleSendEmailJob,
   scheduleSendEmailAfterPdf,
+  resolveRecipientEmailForArEntry,
 };

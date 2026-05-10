@@ -20,4 +20,5 @@ module.exports = {
   invoiceRepository: require('../mongo/invoice.mongo.repository'),
   checkRepository: require('../mongo/check.mongo.repository'),
   pdfDocumentRepository: require('../mongo/pdf-document.mongo.repository'),
+  emailThreadRepository: require('../mongo/email-thread.mongo.repository'),
 };

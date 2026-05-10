@@ -7,7 +7,9 @@ const { FILES_PUBLIC_PREFIX } = require('../../config/api-constants');
 const { requestArrayBuffer } = require('../../utils/http-client');
 const aiService = require('../ai/ai.service');
 const trackingService = require('../tracking/tracking.service');
-const { arEntryRepository } = require('../../data/repositories');
+const { arEntryRepository, emailThreadRepository } = require('../../data/repositories');
+const { toObjectId } = require('../../data/mongo/object-id.util');
+const EmailThreadModel = require('./email.model');
 const { AR_STATUS } = require('../ar/ar.constants');
 const AppError = require('../../utils/app-error');
 
@@ -234,9 +236,148 @@ async function queueOutbound(payload) {
   return { queued: false, stub: true };
 }
 
+function sortThreadMessagesAsc(messages) {
+  return [...(messages || [])].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+  );
+}
+
+function shapeThreadMessageForApi(m) {
+  return {
+    messageId: m.messageId,
+    direction: m.direction,
+    from: m.from,
+    to: m.to,
+    subject: m.subject,
+    body: m.body,
+    timestamp: m.timestamp,
+    ...(m.aiAnalysis ? { aiAnalysis: m.aiAnalysis } : {}),
+    ...(m.metadata ? { metadata: m.metadata } : {}),
+  };
+}
+
+function shapeThreadMessageForThreadView(m) {
+  return {
+    direction: m.direction,
+    from: m.from,
+    subject: m.subject,
+    body: m.body,
+    timestamp: m.timestamp,
+    ...(m.aiAnalysis ? { aiAnalysis: m.aiAnalysis } : {}),
+  };
+}
+
+async function createThreadIfNotExists(arId, invoiceNo) {
+  const oid = toObjectId(arId);
+  if (!oid) throw new AppError('Invalid AR entry id', 400);
+
+  const entry = await arEntryRepository.findById(oid);
+  if (!entry) throw new AppError('AR entry not found', 404);
+
+  const inv =
+    invoiceNo != null && String(invoiceNo).trim()
+      ? String(invoiceNo).trim()
+      : String(entry.invoiceNo || '').trim();
+
+  await emailThreadRepository.upsertEmptyThread({
+    arEntryId: oid,
+    invoiceNo: inv,
+    threadId: String(oid),
+  });
+}
+
+async function addEmailMessage(data = {}) {
+  const dirs = EmailThreadModel.EMAIL_DIRECTION;
+  const direction = data.direction;
+  if (!direction || !Object.values(dirs).includes(direction)) {
+    throw new AppError('direction must be OUTBOUND or INBOUND', 422);
+  }
+
+  const messageId = String(data.messageId || '').trim();
+  if (!messageId) throw new AppError('messageId is required', 422);
+
+  await createThreadIfNotExists(data.arId, data.invoiceNo);
+
+  const oid = toObjectId(data.arId);
+  if (!oid) throw new AppError('Invalid AR entry id', 400);
+
+  const msgDoc = {
+    messageId,
+    direction,
+    from: String(data.from ?? '').trim(),
+    to: String(data.to ?? '').trim(),
+    subject: data.subject != null ? String(data.subject) : '',
+    body: data.body != null ? String(data.body) : '',
+    timestamp: data.timestamp ? new Date(data.timestamp) : new Date(),
+    ...(data.aiAnalysis && typeof data.aiAnalysis === 'object'
+      ? { aiAnalysis: data.aiAnalysis }
+      : {}),
+    ...(data.metadata !== undefined ? { metadata: data.metadata } : {}),
+  };
+
+  if (!msgDoc.from || !msgDoc.to) {
+    throw new AppError('from and to are required', 422);
+  }
+
+  const { modifiedCount } = await emailThreadRepository.appendMessageIfNew(oid, msgDoc);
+  const thread = await emailThreadRepository.findByArEntryId(oid);
+
+  if (modifiedCount === 0) {
+    const dup = thread?.messages?.some((m) => String(m.messageId) === messageId);
+    if (dup) {
+      return {
+        duplicate: true,
+        thread: thread
+          ? {
+              arId: String(thread.arEntryId),
+              invoiceNo: thread.invoiceNo,
+              threadId: thread.threadId,
+              messages: sortThreadMessagesAsc(thread.messages).map(shapeThreadMessageForApi),
+            }
+          : null,
+      };
+    }
+    throw new AppError('Unable to append email message', 409);
+  }
+
+  return {
+    duplicate: false,
+    thread: {
+      arId: String(thread.arEntryId),
+      invoiceNo: thread.invoiceNo,
+      threadId: thread.threadId,
+      messages: sortThreadMessagesAsc(thread.messages).map(shapeThreadMessageForApi),
+    },
+  };
+}
+
+async function getEmailThread(arId) {
+  const oid = toObjectId(arId);
+  if (!oid) throw new AppError('Invalid AR entry id', 400);
+
+  const doc = await emailThreadRepository.findByArEntryId(oid);
+  if (!doc) {
+    const entry = await arEntryRepository.findById(oid);
+    return {
+      arId: String(oid),
+      invoiceNo: entry ? String(entry.invoiceNo || '') : '',
+      messages: [],
+    };
+  }
+
+  return {
+    arId: String(doc.arEntryId),
+    invoiceNo: doc.invoiceNo,
+    messages: sortThreadMessagesAsc(doc.messages).map(shapeThreadMessageForThreadView),
+  };
+}
+
 module.exports = {
   FatalEmailJobError,
   sendInvoiceEmail,
   enqueueManualSendForArEntry,
   queueOutbound,
+  createThreadIfNotExists,
+  addEmailMessage,
+  getEmailThread,
 };

@@ -10,6 +10,17 @@ router.get('/status', emailController.status);
 
 router.use(authMiddleware);
 router.post('/enqueue', validate(emailValidation.enqueue), emailController.enqueue);
+router.post('/message', validate(emailValidation.addThreadMessage), emailController.postThreadMessage);
+router.get(
+  '/thread/:arId',
+  validate(emailValidation.threadArIdParam),
+  emailController.getEmailThread,
+);
+router.post(
+  '/sync-thread/:arId',
+  validate(emailValidation.syncEmailThread),
+  emailController.syncEmailThread,
+);
 router.post('/send/:arId', validate(emailValidation.sendForAr), emailController.sendForAr);
 
 module.exports = router;
